@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+   <title>Manga Translator - Kết quả</title>
+   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+   <link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/logo.png') }}">
+</head>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<body>
+   <header></header>
+
+   <div class="results-container">
+      <h2 class="results-title">✨ Kết quả dịch - <span>{{ images|length }} ảnh</span></h2>
+
+      {% if images %}
+      <div class="image-gallery">
+         {% for img in images %}
+         <div class="image-card" style="animation-delay: {{ loop.index * 0.05 }}s">
+            <div class="image-wrapper">
+               <img class="gallery-image" src="data:image/jpeg;base64,{{ img.data }}" alt="{{ img.name }}" loading="lazy">
+               <div class="image-overlay">
+                  <a href="#" class="overlay-btn view-btn" data-image="{{ img.data }}" data-name="{{ img.name }}">
+                     🔍 Xem lớn
+                  </a>
+               </div>
+            </div>
+            <div class="image-info">
+               <span class="image-name" title="{{ img.name }}">{{ img.name }}</span>
+               <a href="#" class="download-btn" data-image="{{ img.data }}" data-name="{{ img.name }}">
+                  💾 Tải
+               </a>
+            </div>
+         </div>
+         {% endfor %}
+      </div>
+      {% else %}
+      <div class="no-images">
+         <p>😕 Không có ảnh nào được xử lý.</p>
+         <p style="margin-top: 10px; font-size: 14px; opacity: 0.8;">Hãy quay lại và thử lại.</p>
+      </div>
+      {% endif %}
+   </div>
+
+   <div class="buttons_image">
+      <a href="#" class="green" id="download-zip">
+         <span class="btn-icon">📦</span>
+         <span class="btn-text">Download ZIP</span>
+      </a>
+      <a href="/" class="red">
+         <span class="btn-icon">←</span>
+         <span class="btn-text">Dịch thêm</span>
+      </a>
+   </div>
+
+   <!-- Lightbox -->
+   <div id="lightbox" class="lightbox" style="display: none;">
+      <div class="lightbox-overlay"></div>
+      <div class="lightbox-content">
+         <button class="lightbox-close">&times;</button>
+         <img id="lightbox-image" src="" alt="Preview">
+         <div class="lightbox-info">
+            <span id="lightbox-name"></span>
+            <a href="#" id="lightbox-download" class="download-btn">💾 Tải xuống</a>
+         </div>
+      </div>
+   </div>
+
+<script>
+      // Lightbox
+      const lightbox = document.getElementById('lightbox');
+      const lightboxImage = document.getElementById('lightbox-image');
+      const lightboxName = document.getElementById('lightbox-name');
+      const lightboxDownload = document.getElementById('lightbox-download');
+
+      document.querySelectorAll('.view-btn').forEach(btn => {
+         btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const data = btn.getAttribute('data-image');
+            const name = btn.getAttribute('data-name');
+            lightboxImage.src = 'data:image/png;base64,' + data;
+            lightboxName.textContent = name;
+            lightboxDownload.setAttribute('data-image', data);
+            lightboxDownload.setAttribute('data-name', name);
+            lightbox.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+         });
+      });
+
+      function closeLightbox() {
+         lightbox.style.display = 'none';
+         document.body.style.overflow = '';
+      }
+
+      document.querySelector('.lightbox-close').addEventListener('click', closeLightbox);
+      document.querySelector('.lightbox-overlay').addEventListener('click', closeLightbox);
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+      // Download single
+   document.querySelectorAll('.download-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+         e.preventDefault();
+            const data = btn.getAttribute('data-image');
+            const name = btn.getAttribute('data-name');
+            if (!data) return;
+            
+         const a = document.createElement('a');
+            a.href = 'data:image/png;base64,' + data;
+            a.download = name + '_translated.png';
+         a.click();
+
+            const original = btn.innerHTML;
+            btn.innerHTML = '✅';
+            setTimeout(() => btn.innerHTML = original, 1000);
+      });
+   });
+
+      // Download ZIP
+   document.getElementById('download-zip').addEventListener('click', async (e) => {
+      e.preventDefault();
+         const btn = e.currentTarget;
+         const btnText = btn.querySelector('.btn-text');
+         const btnIcon = btn.querySelector('.btn-icon');
+         const origText = btnText.textContent;
+         const origIcon = btnIcon.textContent;
+
+      btn.style.pointerEvents = 'none';
+         btnIcon.textContent = '⏳';
+         btnText.textContent = 'Đang tạo...';
+
+      try {
+         const zip = new JSZip();
+         const folder = zip.folder('manga_translated');
+
+            document.querySelectorAll('.image-card .download-btn').forEach(imgBtn => {
+            const name = imgBtn.getAttribute('data-name');
+            const data = imgBtn.getAttribute('data-image');
+               if (data) {
+                  folder.file(`${name}_translated.png`, atob(data), { binary: true });
+               }
+         });
+
+         const content = await zip.generateAsync({
+            type: 'blob',
+            compression: 'DEFLATE',
+            compressionOptions: { level: 6 }
+         });
+
+         const url = URL.createObjectURL(content);
+         const a = document.createElement('a');
+         a.href = url;
+         a.download = 'manga_translated.zip';
+         a.click();
+         URL.revokeObjectURL(url);
+
+            btnIcon.textContent = '✅';
+            btnText.textContent = 'Đã tải!';
+         } catch (err) {
+            console.error(err);
+            btnIcon.textContent = '❌';
+            btnText.textContent = 'Lỗi';
+         }
+
+         setTimeout(() => {
+            btnIcon.textContent = origIcon;
+            btnText.textContent = origText;
+            btn.style.pointerEvents = 'auto';
+         }, 2000);
+   });
+</script>
+</body>
+
+</html>

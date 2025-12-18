@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+   <title>{{ manga_title }} - Manga Reader</title>
+   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+   <link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/logo.png') }}">
+</head>
+
+<body class="reader-mode">
+   <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+   <div class="reader-layout">
+      <aside class="reader-sidebar" id="reader-sidebar">
+         <div class="sidebar-header">
+            <div class="sidebar-title">📚 {{ manga_title }}</div>
+            <div class="sidebar-subtitle">{{ chapters|length }} chapter</div>
+         </div>
+         
+         <div class="chapter-list">
+            <div class="chapter-list-title">Danh sách chapter</div>
+            {% for chapter in chapters %}
+            <div class="chapter-link {% if chapter.id == current_chapter.id %}active{% endif %} {{ chapter.status }}"
+                 data-chapter-id="{{ chapter.id }}"
+                 data-status="{{ chapter.status }}">
+               <span>📖 {{ chapter.name }}</span>
+               <span class="chapter-status {{ chapter.status }}">
+                  {% if chapter.status == 'completed' %}✓ Sẵn sàng
+                  {% elif chapter.status == 'processing' %}⏳ Đang dịch...
+                  {% else %}○ Chờ{% endif %}
+               </span>
+            </div>
+            {% endfor %}
+         </div>
+
+         <div style="padding: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+            <a href="/" class="chapter-link" style="justify-content: center; background: rgba(255,255,255,0.1);">
+               ← Quay lại trang chủ
+            </a>
+         </div>
+      </aside>
+
+      <main class="reader-content">
+         <div class="reader-header">
+            <button class="reader-toggle-btn" id="toggle-sidebar">☰</button>
+            
+            <div class="reader-nav">
+               <button class="reader-nav-btn" id="prev-chapter-btn" 
+                  {% if not prev_chapter or prev_chapter.status != 'completed' %}disabled{% endif %}>
+                  ← Trước
+               </button>
+               <span class="current-chapter-title">{{ current_chapter.name }}</span>
+               <button class="reader-nav-btn" id="next-chapter-btn"
+                  {% if not next_chapter or next_chapter.status != 'completed' %}disabled{% endif %}>
+                  Sau →
+               </button>
+            </div>
+
+            <div class="reader-actions">
+               <a href="{{ url_for('download_chapter_zip', session_id=session_id, chapter_id=current_chapter.id) }}" 
+                  class="reader-nav-btn" title="Tải chapter này">💾</a>
+            </div>
+         </div>
+
+         <div class="reader-images" id="reader-images">
+            {% if current_chapter.status == 'completed' and current_chapter.images %}
+               {% for img in current_chapter.images %}
+               <div class="reader-image-item">
+                  <img src="data:image/jpeg;base64,{{ img.data }}" alt="Page {{ loop.index }}" loading="lazy">
+               </div>
+               {% endfor %}
+            {% else %}
+               <div style="text-align: center; padding: 100px 20px; color: white;">
+                  <div style="font-size: 60px; margin-bottom: 20px;">⏳</div>
+                  <h2>Đang dịch chapter này...</h2>
+                  <p style="opacity: 0.7; margin-top: 10px;">Vui lòng đợi hoặc chọn chapter khác đã dịch xong</p>
+               </div>
+            {% endif %}
+         </div>
+
+         <div class="reader-chapter-nav">
+            <button class="chapter-nav-btn" id="prev-btn-bottom"
+                    {% if not prev_chapter or prev_chapter.status != 'completed' %}disabled{% endif %}>
+               ← Chapter trước
+            </button>
+            <button class="chapter-nav-btn" id="next-btn-bottom"
+                    {% if not next_chapter or next_chapter.status != 'completed' %}disabled{% endif %}>
+               Chapter sau →
+            </button>
+         </div>
+      </main>
+   </div>
+
+   <div class="processing-overlay" id="processing-overlay" style="display: none;">
+      <div class="processing-title">
+         <span>⏳</span>
+         <span id="processing-text">Đang dịch chapter tiếp theo...</span>
+      </div>
+      <div id="processing-chapter-name" style="font-size: 12px; opacity: 0.8; margin-bottom: 5px;"></div>
+      <div class="processing-progress">
+         <div class="processing-progress-bar" id="processing-progress-bar" style="width: 0%;"></div>
+      </div>
+   </div>
+
+   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+   <script>
+      const sessionId = '{{ session_id }}';
+      const currentChapterId = {{ current_chapter.id }};
+      const totalChapters = {{ chapters|length }};
+      
+      // Build chapters array from template data (without using tojson filter)
+      const chapters = [
+         {% for ch in chapters %}
+         { id: {{ ch.id }}, name: "{{ ch.name|e }}", status: "{{ ch.status }}", progress: {{ ch.progress }} }{{ "," if not loop.last else "" }}
+         {% endfor %}
+      ];
+
+      const socket = io();
+
+      socket.on('connect', function() {
+         socket.emit('join_session', { session_id: sessionId });
+      });
+
+      socket.on('chapter_progress', function(data) {
+         if (data.session_id !== sessionId) return;
+         
+         const overlay = document.getElementById('processing-overlay');
+         const progressBar = document.getElementById('processing-progress-bar');
+         const chapterName = document.getElementById('processing-chapter-name');
+         const processingText = document.getElementById('processing-text');
+         
+         const chapter = chapters.find(c => c.id === data.chapter_id);
+         if (chapter) {
+            chapter.status = data.status;
+            chapter.progress = data.progress;
+         }
+         
+         if (data.status === 'processing') {
+            overlay.style.display = 'block';
+            chapterName.textContent = data.chapter_name;
+            progressBar.style.width = data.progress + '%';
+            processingText.textContent = data.message || 'Đang dịch...';
+         } else if (data.status === 'completed') {
+            overlay.style.display = 'none';
+            updateNavButtons();
+         }
+         
+         updateChapterStatus(data.chapter_id, data.status);
+      });
+
+      function updateChapterStatus(chapterId, status) {
+         const link = document.querySelector('[data-chapter-id="' + chapterId + '"]');
+         if (!link) return;
+         
+         link.classList.remove('pending', 'processing', 'completed');
+         link.classList.add(status);
+         link.setAttribute('data-status', status);
+         
+         const statusSpan = link.querySelector('.chapter-status');
+         if (statusSpan) {
+            statusSpan.className = 'chapter-status ' + status;
+            statusSpan.textContent = status === 'completed' ? '✓ Sẵn sàng' : 
+                                    status === 'processing' ? '⏳ Đang dịch...' : '○ Chờ';
+         }
+      }
+
+      function updateNavButtons() {
+         const currentIdx = chapters.findIndex(c => c.id === currentChapterId);
+         
+         if (currentIdx > 0) {
+            const prev = chapters[currentIdx - 1];
+            document.getElementById('prev-chapter-btn').disabled = prev.status !== 'completed';
+            document.getElementById('prev-btn-bottom').disabled = prev.status !== 'completed';
+         }
+         
+         if (currentIdx < chapters.length - 1) {
+            const next = chapters[currentIdx + 1];
+            document.getElementById('next-chapter-btn').disabled = next.status !== 'completed';
+            document.getElementById('next-btn-bottom').disabled = next.status !== 'completed';
+         }
+      }
+
+      function loadChapter(chapterId) {
+         const chapter = chapters.find(c => c.id === chapterId);
+         if (!chapter || chapter.status !== 'completed') {
+            alert('Chapter này chưa được dịch xong!');
+            return;
+         }
+         window.location.href = '/reader/' + sessionId + '/' + chapterId;
+      }
+
+      function prevChapter() {
+         const currentIdx = chapters.findIndex(c => c.id === currentChapterId);
+         if (currentIdx > 0) loadChapter(chapters[currentIdx - 1].id);
+      }
+
+      function nextChapter() {
+         const currentIdx = chapters.findIndex(c => c.id === currentChapterId);
+         if (currentIdx < chapters.length - 1) loadChapter(chapters[currentIdx + 1].id);
+      }
+
+      function toggleSidebar() {
+         document.getElementById('reader-sidebar').classList.toggle('open');
+         document.getElementById('sidebar-overlay').classList.toggle('show');
+      }
+
+      // Event listeners
+      document.getElementById('toggle-sidebar').addEventListener('click', toggleSidebar);
+      document.getElementById('sidebar-overlay').addEventListener('click', toggleSidebar);
+      document.getElementById('prev-chapter-btn').addEventListener('click', prevChapter);
+      document.getElementById('next-chapter-btn').addEventListener('click', nextChapter);
+      document.getElementById('prev-btn-bottom').addEventListener('click', prevChapter);
+      document.getElementById('next-btn-bottom').addEventListener('click', nextChapter);
+      
+      document.querySelectorAll('.chapter-link[data-chapter-id]').forEach(link => {
+         link.addEventListener('click', function() {
+            const id = parseInt(this.getAttribute('data-chapter-id'));
+            const status = this.getAttribute('data-status');
+            if (status === 'completed') loadChapter(id);
+            else alert('Chapter này chưa được dịch xong!');
+         });
+      });
+
+      document.addEventListener('keydown', function(e) {
+         if (e.key === 'ArrowLeft') prevChapter();
+         else if (e.key === 'ArrowRight') nextChapter();
+      });
+
+      window.scrollTo(0, 0);
+   </script>
+</body>
+
+</html>
